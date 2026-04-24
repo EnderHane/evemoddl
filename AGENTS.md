@@ -1,28 +1,35 @@
-## Lint and Format
-- Run `cargo clippy` and fix all errors and warnings before committing
-- Format with nightly: `cargo +nightly fmt` (required - .rustfmt.toml uses unstable_features)
+## Commands
+- Format with `cargo +nightly fmt`; `.rustfmt.toml` uses unstable rustfmt options.
+- Run `cargo clippy -- -D warnings` before committing so warnings fail locally.
+- Run tests with `cargo test`; focus one test with `cargo test <test_name>`.
+- Use `cargo run -- -C ./test_mods <command>` for filesystem/manual CLI checks; `./test_mods/` is gitignored.
 
-## Testing
-- Filesystem tests must use `./test_mods/` (gitignored)
-- No unit tests currently exist; use standard `cargo test` when added
+## Project Shape
+- Single-crate Rust 2024 CLI; `src/main.rs` wires Clap commands to one module per command.
+- No README, CI, task runner, or workspace config currently exists; trust `Cargo.toml`, `.rustfmt.toml`, and `src/`.
+- Persisted config is TOML from `directories::ProjectDirs`, e.g. `~/.config/evemoddl/config.toml` on Linux.
+- The active mods directory is `-C <dir>` if supplied, otherwise persisted `mods_dir`; there is no env var for `mods_dir`.
 
-## Project Structure
-- Single crate CLI for managing Celeste (Everest) game mods
-- Config stored in system config dir (~/.config/evemoddl/ on Linux)
-- Mod metadata cached in `.evemoddl/` within the active mods directory:
-  - `files.toml` - installed mod state
-  - `everest_update.yaml` - update list from mirror
-  - `mod_dependency_graph.yaml` - dependency graph from mirror
-  - `files/` - downloaded mod archives
+## CLI State
+- `update` must run before commands needing mirror metadata; it writes `.evemoddl/mod_dependency_graph.yaml` and `.evemoddl/everest_update.yaml` under the active mods dir.
+- `pull` downloads archives to `.evemoddl/files/<ModID>.zip.tmp`, verifies update-list `xxHash`, then renames to `.evemoddl/files/<ModID>.zip` and updates `.evemoddl/files.toml`.
+- `pull` records `version`, `is_explicit`, and `loaded`; pulling an already-current dependency should still promote it to explicit.
+- `load` creates hard links from `.evemoddl/files/*.zip` into the active mods dir, skips existing target zips, and marks mods loaded.
+- `unload` and `remove` operate only on explicit mods directly; dependency links/state are cleaned based on remaining explicit mods.
+- Exact ModID args use `src/mod_id.rs`: letters match case-insensitively, and spaces/special chars may be typed as themselves, `-`, or `_`; ambiguous matches are errors.
 
-## CLI Commands
-- `set-mods-dir <path>` - Set default mods directory (stored in config)
-- `update` - Download latest mod lists from mirror (requires --mirror or EVEMODDL_UPDATE_MIRROR)
-- `search <query>` - Search installed update list for mods
-- `pull <modid>...` - Download mods and dependencies from GameBanana (requires --mirror or EVEMODDL_GAMEBANANA_MIRROR)
-- Use `-C <dir>` to override working directory for any command
+## Dependency Rules
+- Resolve only `Dependencies`; `OptionalDependencies` are informational and never auto-installed.
+- Always skip `Celeste`, `Everest`, and `EverestCore`; they are core system deps, not managed archives.
+- `remove` refuses direct removal of dependency-only mods and auto-removes orphaned dependencies.
 
 ## Mirrors
-- Default update mirror: https://everestapi.github.io/updatermirror/
-- Default GameBanana mirror: https://gamebanana.com/mmdl
-- Override priority: CLI arg > env var > config file > default
+- Update mirror default: `https://everestapi.github.io/updatermirror/`.
+- GameBanana mirror default: `https://gamebanana.com/mmdl`.
+- Mirror priority is CLI `-m` over env var over config over default.
+- Env vars: `EVEMODDL_UPDATE_MIRROR`, `EVEMODDL_GAMEBANANA_MIRROR`.
+
+## Command Map
+- `set-mods-dir <path>` stores the default mods dir.
+- `config show|get [field]`, `config set <field> <value>`, `config unset <field>` manage `mods_dir`, `update_mirror`, and `gamebanana_mirror`.
+- `update [-m <mirror>]`, `search <query>`, `tree [--loaded|MODID]`, `pull|download|dl [-m <mirror>] <MODID>...`, `load <MODID>...`, `unload <MODID>...`, `remove|rm <MODID>...`.
